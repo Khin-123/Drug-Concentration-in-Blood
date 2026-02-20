@@ -3,106 +3,175 @@ import numpy as np
 import matplotlib.pyplot as plt
 import io
 import base64
+import json
 from scipy import signal
 
 app = Flask(__name__)
 
-# Drug defaults for quick select
+# ==============================
+# Updated Drug Database
+# ==============================
+
 DRUG_DB = {
-    "Aspirin": {
-        "ka": 1.5, "ke": 0.23, "dose": 325, "interval": 4,
-        "toxic": 300, "min_eff": 30,
-        "Vd": 10, "F": 1.0, "scale": 1
-    },
-    "Caffeine": {
-        "ka": 2.0, "ke": 0.12, "dose": 100, "interval": 6,
-        "toxic": 50, "min_eff": 3,
-        "Vd": 42, "F": 1.0, "scale": 1
-    },
     "Theophylline": {
-        "ka": 1.2, "ke": 0.08, "dose": 200, "interval": 8,
-        "toxic": 20, "min_eff": 5,
-        "Vd": 35, "F": 1.0, "scale": 1
+        "ka": 1.0,
+        "ke": 0.1,
+        "dose": 200,
+        "doses_per_day": 4,
+        "interval": 16 / 4,
+        "toxic": 20,
+        "min_eff": 5,
+        "Vd": 35,
+        "F": 1.0,
+        "scale": 1
     },
-    "Digoxin": {
-        "ka": 0.8, "ke": 0.02, "dose": 0.25, "interval": 24,
-        "toxic": 2.0, "min_eff": 0.3,
-        "Vd": 490, "F": 0.7, "scale": 1000
+    "Antibiotics": {   # generic beta-lactam profile
+        "ka": 1.3,
+        "ke": 0.5,
+        "dose": 500,
+        "doses_per_day": 3,
+        "interval": 16 / 3,
+        "toxic": 50,
+        "min_eff": 10,
+        "Vd": 20,
+        "F": 0.9,
+        "scale": 1
+    },
+    "Furosemide": {
+        "ka": 1.2,
+        "ke": 0.35,
+        "dose": 40,
+        "doses_per_day": 2,
+        "interval": 16 / 2,
+        "toxic": 8,
+        "min_eff": 1,
+        "Vd": 12,
+        "F": 0.7,
+        "scale": 1
+    },
+    "Metronidazole": {
+        "ka": 1.1,
+        "ke": 0.15,
+        "dose": 400,
+        "doses_per_day": 3,
+        "interval": 16 / 3,
+        "toxic": 40,
+        "min_eff": 8,
+        "Vd": 40,
+        "F": 1.0,
+        "scale": 1
+    },
+    "Ciprofloxacin": {
+        "ka": 1.5,
+        "ke": 0.25,
+        "dose": 500,
+        "doses_per_day": 3,
+        "interval": 16 / 3,
+        "toxic": 6,
+        "min_eff": 1,
+        "Vd": 30,
+        "F": 0.8,
+        "scale": 1
     },
     "Custom": {
-        "ka": 1.2, "ke": 0.3, "dose": 100, "interval": 8,
-        "toxic": 50, "min_eff": 5,
-        "Vd": 40, "F": 1.0, "scale": 1
+        "ka": 1.2,
+        "ke": 0.3,
+        "dose": 100,
+        "doses_per_day": 3,
+        "interval": 16 / 3,
+        "toxic": 50,
+        "min_eff": 5,
+        "Vd": 40,
+        "F": 1.0,
+        "scale": 1
     }
 }
+
+SIM_TIME = 16  # 16 hours simulation
 
 
 def parse_float(form, key, default):
     try:
         return float(form.get(key, default))
-    except (TypeError, ValueError):
+    except:
         return float(default)
 
 
 def generate_plot(params):
-    t = np.linspace(0, 48, 1000)
+    t = np.linspace(0, SIM_TIME, 1000)
     dt = t[1] - t[0]
     scale = params.get("scale", 1)
 
-    # Oral transfer function: F * ka / Vd / ((s + ka)(s + ke))
+    # Transfer Functions
     num_oral = [params["F"] * params["ka"] / params["Vd"]]
     den_oral = [1, params["ka"] + params["ke"], params["ka"] * params["ke"]]
     sys_oral = signal.TransferFunction(num_oral, den_oral)
 
-    # IV transfer function: 1 / Vd / (s + ke)
     num_iv = [1 / params["Vd"]]
     den_iv = [1, params["ke"]]
     sys_iv = signal.TransferFunction(num_iv, den_iv)
 
-    # Impulse train for oral doses
-    u_pill = np.zeros_like(t)
-    interval = max(1, int(params["interval"]))
-    for d in range(0, 48, interval):
-        time_point = d
-        if d == interval and params["missed"] > 0:
-            time_point = d + params["missed"]
+    # ========================
+    # ORAL DOSE TIMING
+    # ========================
 
-        idx = np.argmin(np.abs(t - time_point))
-        if idx < len(u_pill):
-            # Approximate bolus as an impulse with area equal to dose.
+    doses_per_day = int(params["doses_per_day"])
+    interval = params["interval"]
+
+    dose_times = [0]
+
+    if doses_per_day >= 2:
+        dose_times.append(interval + params["delay2"])
+
+    if doses_per_day >= 3:
+        dose_times.append(2 * interval + params["delay3"])
+
+    if doses_per_day == 4:
+        dose_times.append(3 * interval)
+
+    # Impulse train
+    u_pill = np.zeros_like(t)
+    for time_point in dose_times:
+        if 0 <= time_point <= SIM_TIME:
+            idx = np.argmin(np.abs(t - time_point))
             u_pill[idx] = params["dose"] / dt
 
     _, y_pill, _ = signal.lsim(sys_oral, U=u_pill, T=t)
 
-    # Constant IV infusion (for comparison)
+    # ========================
+    # IV INFUSION (constant)
+    # ========================
     u_iv = np.full_like(t, params["dose"] / interval)
     _, y_iv, _ = signal.lsim(sys_iv, U=u_iv, T=t)
 
     y_pill *= scale
     y_iv *= scale
+
     toxic_scaled = params["toxic"] * scale
     min_eff_scaled = params["min_eff"] * scale
 
+    # Plot
     plt.figure(figsize=(10, 5))
-    plt.plot(t, y_pill, label="Oral doses (impulse train)", color="#007bff", linewidth=2)
-    plt.plot(t, y_iv, label="Constant IV infusion", color="#28a745", linestyle="--")
-    plt.axhline(y=toxic_scaled, color="#dc3545", linestyle=":", label="Toxic threshold")
-    plt.axhline(y=min_eff_scaled, color="#ffc107", linestyle=":", label="Minimum effective")
-    plt.fill_between(t, min_eff_scaled, toxic_scaled, color="#28a745", alpha=0.08)
+    plt.plot(t, y_pill, label="Oral doses", linewidth=2)
+    plt.plot(t, y_iv, linestyle="--", label="Continuous IV")
+    plt.axhline(y=toxic_scaled, linestyle=":", label="Toxic")
+    plt.axhline(y=min_eff_scaled, linestyle=":", label="Min Effective")
+    plt.fill_between(t, min_eff_scaled, toxic_scaled, alpha=0.1)
+
     plt.title(f"Pharmacokinetics - {params['name']}")
     plt.xlabel("Time (hours)")
-    unit = "(ng/mL)" if scale > 1 else "(mg/L)"
-    plt.ylabel(f"Plasma concentration {unit}")
+    plt.ylabel("Plasma Concentration (mg/L)")
     plt.legend()
-    plt.grid(True, alpha=0.15)
+    plt.grid(alpha=0.2)
 
     img = io.BytesIO()
-    plt.savefig(img, format="png", dpi=100, bbox_inches="tight")
+    plt.savefig(img, format="png", bbox_inches="tight")
     img.seek(0)
-    plot_url = base64.b64encode(img.getvalue()).decode("utf-8")
+    plot_url = base64.b64encode(img.getvalue()).decode()
     plt.close()
 
     max_conc = float(np.max(y_pill))
+
     if max_conc > toxic_scaled:
         status = "TOXIC"
     elif max_conc < min_eff_scaled:
@@ -115,56 +184,47 @@ def generate_plot(params):
 
 @app.route("/", methods=["GET", "POST"])
 def index():
+    selected_drug = "Theophylline"
+    base = DRUG_DB[selected_drug]
+
+    form_values = {
+        "ka": base["ka"],
+        "ke": base["ke"],
+        "vd": base["Vd"],
+        "dose": base["dose"],
+        "doses_per_day": base["doses_per_day"],
+        "interval": base.get("interval", 16 / base["doses_per_day"]),
+        "delay2": 0,
+        "delay3": 0,
+        "toxic": base["toxic"],
+        "min_eff": base["min_eff"],
+    }
+
     plot_url = None
     status = None
     max_c = None
 
-    selected_drug = "Aspirin"
-    base_defaults = DRUG_DB[selected_drug]
-    form_values = {
-        "ka": base_defaults["ka"],
-        "ke": base_defaults["ke"],
-        "vd": base_defaults["Vd"],
-        "dose": base_defaults["dose"],
-        "interval": base_defaults["interval"],
-        "missed": 0,
-        "toxic": base_defaults["toxic"],
-        "min_eff": base_defaults["min_eff"],
-    }
-
     if request.method == "POST":
-        selected_drug = request.form.get("drug_select", "Custom")
-        if selected_drug not in DRUG_DB:
-            selected_drug = "Custom"
-
+        selected_drug = request.form.get("drug_select")
         base = DRUG_DB[selected_drug]
-        interval = max(1, int(parse_float(request.form, "interval", base["interval"])))
 
         p = {
             "ka": parse_float(request.form, "ka", base["ka"]),
             "ke": parse_float(request.form, "ke", base["ke"]),
             "dose": parse_float(request.form, "dose", base["dose"]),
-            "interval": interval,
+            "doses_per_day": int(parse_float(request.form, "doses_per_day", base["doses_per_day"])),
+            "interval": parse_float(request.form, "interval", base.get("interval", 16 / base["doses_per_day"])),
+            "delay2": parse_float(request.form, "delay2", 0),
+            "delay3": parse_float(request.form, "delay3", 0),
             "toxic": parse_float(request.form, "toxic", base["toxic"]),
             "min_eff": parse_float(request.form, "min_eff", base["min_eff"]),
             "Vd": parse_float(request.form, "vd", base["Vd"]),
             "F": base["F"],
             "scale": base["scale"],
             "name": selected_drug,
-            "missed": parse_float(request.form, "missed", 0),
         }
 
-        form_values = {
-            "ka": p["ka"],
-            "ke": p["ke"],
-            "vd": p["Vd"],
-            "dose": p["dose"],
-            "interval": p["interval"],
-            "missed": p["missed"],
-            "toxic": p["toxic"],
-            "min_eff": p["min_eff"],
-        }
-
+        form_values = p
         plot_url, status, max_c = generate_plot(p)
 
     return render_template(
@@ -175,6 +235,7 @@ def index():
         drugs=list(DRUG_DB.keys()),
         selected=selected_drug,
         form_values=form_values,
+        drugs_json=json.dumps(DRUG_DB)
     )
 
 
