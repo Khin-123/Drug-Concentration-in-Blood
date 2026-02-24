@@ -171,6 +171,7 @@ def generate_plot(params):
     plt.close()
 
     max_conc = float(np.max(y_pill))
+    min_conc = float(np.min(y_pill))
 
     if max_conc > toxic_scaled:
         status = "TOXIC"
@@ -178,8 +179,54 @@ def generate_plot(params):
         status = "SUBTHERAPEUTIC"
     else:
         status = "SAFE"
+        
+     # =============================
+    # USER-FRIENDLY MESSAGES
+    # =============================
+    messages = []
 
-    return plot_url, status, round(max_conc, 2)
+    # Toxicity message
+    if max_conc > toxic_scaled:
+        messages.append(
+            "⚠ Drug concentration exceeds the toxic threshold. This schedule may cause adverse effects."
+        )
+
+    # Under-dose message
+    if max_conc < min_eff_scaled:
+        messages.append(
+            "⚠ Drug levels never reach the minimum effective concentration. Therapeutic effect may not occur."
+        )
+
+    # Drops below effective level before next dose
+    # Only warn here when the overall status is not SAFE
+    if status != "SAFE" and min_conc < min_eff_scaled and max_conc > min_eff_scaled:
+        messages.append(
+            "⚠ Drug concentration falls below effective level before the next dose. Consider reducing interval."
+        )
+
+    # Delay warnings
+    if params["delay2"] > 0.5:
+        messages.append(
+            "⏳ There is a noticeable delay in the second dose. This may reduce overall drug stability."
+        )
+
+    if params["delay3"] > 0.5:
+        messages.append(
+            "⏳ There is a delay in the third dose. Irregular dosing can cause concentration fluctuations."
+        )
+
+    # Too frequent dosing
+    if interval < (SIM_TIME / doses_per_day) * 0.7:
+        messages.append(
+            "⚠ Doses are administered very frequently. Monitor for drug accumulation."
+        )
+
+    if not messages:
+        messages.append(
+            "✔ Drug concentration remains within the therapeutic window. Current dosing appears appropriate."
+        )
+    
+    return plot_url, status, round(max_conc, 2), messages
 
 
 @app.route("/", methods=["GET", "POST"])
@@ -190,7 +237,7 @@ def index():
     form_values = {
         "ka": base["ka"],
         "ke": base["ke"],
-        "vd": base["Vd"],
+        "Vd": base["Vd"],
         "dose": base["dose"],
         "doses_per_day": base["doses_per_day"],
         "interval": base.get("interval", 16 / base["doses_per_day"]),
@@ -203,6 +250,7 @@ def index():
     plot_url = None
     status = None
     max_c = None
+    messages = None
 
     if request.method == "POST":
         selected_drug = request.form.get("drug_select")
@@ -218,20 +266,21 @@ def index():
             "delay3": parse_float(request.form, "delay3", 0),
             "toxic": parse_float(request.form, "toxic", base["toxic"]),
             "min_eff": parse_float(request.form, "min_eff", base["min_eff"]),
-            "Vd": parse_float(request.form, "vd", base["Vd"]),
+            "Vd": parse_float(request.form, "Vd", base["Vd"]),
             "F": base["F"],
             "scale": base["scale"],
             "name": selected_drug,
         }
 
         form_values = p
-        plot_url, status, max_c = generate_plot(p)
+        plot_url, status, max_c, messages = generate_plot(p)
 
     return render_template(
         "index.html",
         plot_url=plot_url,
         status=status,
         max_c=max_c,
+        messages=messages,
         drugs=list(DRUG_DB.keys()),
         selected=selected_drug,
         form_values=form_values,
