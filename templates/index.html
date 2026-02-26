@@ -104,6 +104,12 @@
             color: #a86835;
         }
 
+        .status-risky {
+            border-color: #b54708 !important;
+            background: #ffedd5;
+            color: #9a3412;
+        }
+
         .btn-primary {
             border-radius: 999px;
             font-weight: 700;
@@ -200,7 +206,7 @@
                         </div>
                         <div class="col-4">
                             <label class="form-label">Doses/day</label>
-                            <input type="number" name="doses_per_day" value="{{ form_values.doses_per_day }}" class="form-control">
+                            <input type="number" name="doses_per_day" id="dosesPerDay" value="{{ form_values.doses_per_day }}" class="form-control">
                         </div>
                         <div class="col-4">
                             <label class="form-label">Interval (h)</label>
@@ -250,6 +256,7 @@
                                 <div class="status-box border
                                     {% if status == 'SAFE' %}status-safe
                                     {% elif status == 'TOXIC' %}status-toxic
+                                    {% elif status == 'RISKY' %}status-risky
                                     {% else %}status-sub{% endif %}">
                                     <div class="small text-uppercase text-muted mb-1">System status</div>
                                     <div class="fw-semibold">{{ status }}</div>
@@ -314,12 +321,14 @@ function populateFormFields(drugName) {
     document.getElementById("ka").value = data.ka;
     document.getElementById("ke").value = data.ke;
     document.getElementById("dose").value = data.dose;
+    document.getElementById("dosesPerDay").value = data.doses_per_day;
     document.getElementById("interval").value = data.interval;
     document.getElementById("toxic").value = data.toxic;
     document.getElementById("min_eff").value = data.min_eff;
     document.getElementById("Vd").value = data.Vd;
 
     applyVdLock(drugName);
+    updateDelayFields();
 }
 
 if (drugSelect) {
