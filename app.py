@@ -173,7 +173,7 @@ def generate_plot(params):
     plt.figure(figsize=(10, 5))
     plt.plot(t, y_pill, label="Oral doses", linewidth=2)
     plt.plot(t, y_iv, linestyle="--", label="Continuous IV")
-    plt.axhline(y=toxic_scaled, linestyle=":", label="Toxic")
+    plt.axhline(y=toxic_scaled, linestyle=":", label="Max effective")
     plt.axhline(y=min_eff_scaled, linestyle=":", label="Min Effective")
     plt.fill_between(t, min_eff_scaled, toxic_scaled, alpha=0.1)
 
@@ -233,7 +233,7 @@ def generate_plot(params):
 
     if toxic_overshoot:
         messages.append(
-            "Warning: Drug concentration exceeds the toxic threshold. This schedule may cause adverse effects."
+            "Warning: Drug concentration exceeds the max effective threshold. This schedule may cause adverse effects."
         )
 
     if many_ineffective_doses:
